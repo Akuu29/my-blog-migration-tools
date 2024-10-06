@@ -1,0 +1,103 @@
+Project my_blod_db {
+  database_type: "PostgreSQL"
+}
+
+Enum user_role {
+  admin
+  user
+}
+
+Table users {
+  id uuid [pk, default: "uuid_generate_v4()"]
+  name varchar [not null]
+  email varchar [unique, not null]
+  role user_role [not null, default: "user"]
+  idp_sub varchar [unique, not null]
+  created_at timestamp [default: "current_timestamp"]
+  updated_at timestamp [default: "current_timestamp"]
+}
+
+Enum article_status {
+  draft
+  published
+  deleted
+}
+
+Table articles {
+  id serial [pk]
+  title varchar [unique, not null]
+  body text [not null]
+  status article_status [default: "draft"]
+  user_id uuid [not null]
+  category_id int [default: null]
+  created_at timestamp [default: "current_timestamp"]
+  updated_at timestamp [default: "current_timestamp"]
+}
+
+Ref: articles.user_id > users.id [delete: cascade]
+Ref: articles.category_id - categories.id [delete: set null]
+
+Table categories {
+  id serial [pk]
+  name varchar [not null]
+  user_id uuid [not null]
+  created_at timestamp [default: "current_timestamp"]
+  updated_at timestamp [default: "current_timestamp"]
+
+  indexes {
+    (name, user_id) [unique]
+  }
+}
+
+Ref: categories.user_id > users.id [delete: cascade]
+
+Table tags {
+  id serial [pk]
+  name varchar [not null]
+  user_id uuid [not null]
+  created_at timestamp [default: "current_timestamp"]
+  updated_at timestamp [default: "current_timestamp"]
+
+  indexes {
+    (name, user_id) [unique]
+  }
+}
+
+Ref: tags.user_id > users.id [delete: cascade]
+
+Table article_tags {
+  article_id int [not null]
+  tag_id int [not null]
+  created_at timestamp [default: "current_timestamp"]
+  updated_at timestamp [default: "current_timestamp"]
+
+  indexes {
+    (article_id, tag_id) [unique]
+  }
+}
+
+Ref: article_tags.article_id <> articles.id [delete: cascade]
+Ref: article_tags.tag_id <> tags.id [delete: cascade]
+
+Table comments {
+  id serial [pk]
+  body varchar [not null]
+  user_id uuid [default: null]
+  user_name varchar [default: null]
+  article_id int [not null]
+  created_at timestamp [default: "current_timestamp"]
+  updated_at timestamp [default: "current_timestamp"]
+}
+
+Ref: comments.user_id > users.id [delete: set null]
+Ref: comments.article_id > articles.id [delete: cascade]
+
+Table images {
+  id serial [pk]
+  url text [not null]
+  article_id int [not null]
+  created_at timestamp [default: "current_timestamp"]
+  updated_at timestamp [default: "current_timestamp"]
+}
+
+Ref: images.article_id > articles.id [delete: cascade]
