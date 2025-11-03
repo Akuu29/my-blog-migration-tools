@@ -1,0 +1,11 @@
+CREATE TABLE identity_providers (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL UNIQUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER trg_identity_providers_updated_at
+  BEFORE UPDATE ON identity_providers
+  FOR EACH ROW
+  EXECUTE FUNCTION updated_at_trigger();
