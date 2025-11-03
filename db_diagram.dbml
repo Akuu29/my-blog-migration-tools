@@ -1,103 +1,341 @@
-Project my_blod_db {
+Project my_blog_db {
   database_type: "PostgreSQL"
+  Note: {
+    """
+    required extensions:
+      - uuid-ossp
+    """
+  }
 }
 
+/* ---- Triggers ---- */
+Note: {
+  """
+  updated_at_trigger:
+    description: update updated_at column to current timestamp when row is updated
+  """
+}
+
+/* ---- Users ---- */
 Enum user_role {
   admin
   user
 }
 
 Table users {
-  id uuid [pk, default: "uuid_generate_v4()"]
-  name varchar [not null]
-  email varchar [unique, not null]
+  id serial [pk]
+  public_id uuid [unique, default: "uuid_generate_v4()"]
+  name varchar(45) [not null]
   role user_role [not null, default: "user"]
-  idp_sub varchar [unique, not null]
-  created_at timestamp [default: "current_timestamp"]
-  updated_at timestamp [default: "current_timestamp"]
+  is_active boolean [default: true]
+  last_login_at timestamptz [default: "current_timestamp"]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_users_updated_at"
+    }
+  ]
 }
 
+/* ---- Identity Providers ---- */
+Table identity_providers {
+  id serial [pk]
+  name varchar [
+    not null,
+    unique,
+    Note: {
+      "Seeds:
+        - 1: firebase
+        - 2: auth0
+        - 3: cognito
+        - 4: okta
+        - 5: github
+        - 6: google_cloud_identity
+        - 7: custom"
+    }
+  ]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [default: "current_timestamp"]
+}
+
+/* ---- User Identities ---- */
+Table user_identities {
+  id serial [pk]
+  user_id int [not null]
+  provider_id int [not null]
+  provider_user_id varchar [not null]
+  provider_email_ciphertext bytea [not null]
+  provider_email_cipher_nonce bytea [not null]
+  provider_email_cipher_meta jsonb [
+    not null,
+    Note: {
+      "Example: {'alg': 'aes-256-gcm', 'key_ver': 1}"
+    }
+  ]
+  provider_email_hash varchar(128) [not null]
+  provider_email_verified boolean [default: false]
+  is_primary boolean [default: false]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_identity_providers_updated_at"
+    }
+  ]
+
+  indexes {
+    (user_id) [
+      unique,
+      name: "idx_user_identities_user_id",
+      Note: {
+        "WHERE is_primary"
+      }
+    ]
+    (provider_id, provider_user_id) [
+      unique,
+      name: "uq_user_identities_provider_user_id"
+    ]
+    (provider_email_hash) [
+      name: "idx_user_identities_provider_email_hash"
+    ]
+  }
+}
+Ref: user_identities.user_id > users.id [delete: cascade]
+Ref: user_identities.provider_id > identity_providers.id [delete: cascade]
+
+/* ---- Refresh Tokens ---- */
+Table refresh_tokens {
+  id serial [pk]
+  user_id int [not null]
+  token_hash varchar(128) [not null]
+  expires_at timestamptz [not null]
+  revoked_reason varchar [
+    default: null
+    Note: {
+      "Example: 'logout', 'revoke', 'admin_force'"
+    }
+  ]
+  last_used_at timestamptz [default: null]
+  revoked_at timestamptz [default: null]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_refresh_tokens_updated_at"
+    }
+  ]
+}
+Ref: refresh_tokens.user_id > users.id [delete: cascade]
+
+/* ---- Articles ---- */
 Enum article_status {
   draft
+  private
   published
   deleted
 }
 
 Table articles {
   id serial [pk]
-  title varchar [unique, not null]
-  body text [not null]
+  public_id uuid [unique, default: "uuid_generate_v4()"]
+  title varchar
+  slug varchar
+  body text
   status article_status [default: "draft"]
-  user_id uuid [not null]
+  user_id int [not null]
   category_id int [default: null]
-  created_at timestamp [default: "current_timestamp"]
-  updated_at timestamp [default: "current_timestamp"]
+  first_published_at timestamptz [default: null]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_articles_updated_at"
+    }
+  ]
+
+  indexes {
+    (user_id, status, updated_at) [
+      desc
+      name: "idx_articles_user_status_updated_at_desc"
+    ]
+    (user_id, title) [
+      unique,
+      name: "uq_articles_user_title_active"
+      Note: {
+        "Partial: unique when title is not null and status is published / draft / private"
+      }
+    ]
+    (user_id, slug) [
+      unique,
+      name: "uq_articles_user_slug_active",
+      Note: {
+        "Partial: unique when slug is not null and status is published / draft / private"
+      }
+    ]
+  }
 }
-
 Ref: articles.user_id > users.id [delete: cascade]
-Ref: articles.category_id - categories.id [delete: set null]
+Ref: articles.category_id > categories.id [delete: set null]
 
+// Table article_views {
+//   id serial [pk]
+//   article_id int [not null]
+//   user_id uuid [not null]
+//   created_at timestamptz [default: "current_timestamp"]
+//   updated_at timestamptz [default: "current_timestamp"]
+
+//   indexes {
+//     (article_id, user_id) [unique]
+//   }
+// }
+// Ref: article_views.article_id > articles.id [delete: cascade]
+// Ref: article_views.user_id > users.id [delete: cascade]
+
+/* ---- Categories ---- */
 Table categories {
   id serial [pk]
-  name varchar [not null]
-  user_id uuid [not null]
-  created_at timestamp [default: "current_timestamp"]
-  updated_at timestamp [default: "current_timestamp"]
+  public_id uuid [unique, default: "uuid_generate_v4()"]
+  name varchar(60) [not null]
+  slug varchar
+  user_id int [not null]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_categories_updated_at"
+    }
+  ]
 
   indexes {
-    (name, user_id) [unique]
+    (user_id, name) [
+      unique,
+      name: "uq_categories_user_name"
+    ]
+    (user_id, slug) [
+      unique,
+      name: "uq_categories_user_slug"
+    ]
   }
 }
-
 Ref: categories.user_id > users.id [delete: cascade]
 
+/* ---- Tags ---- */
 Table tags {
   id serial [pk]
-  name varchar [not null]
-  user_id uuid [not null]
-  created_at timestamp [default: "current_timestamp"]
-  updated_at timestamp [default: "current_timestamp"]
+  public_id uuid [unique, default: "uuid_generate_v4()"]
+  name varchar(30) [not null]
+  user_id int [not null]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_tags_updated_at"
+    }
+  ]
 
   indexes {
-    (name, user_id) [unique]
+    (user_id, name) [
+      unique,
+      name: "uq_tags_user_name"
+    ]
   }
 }
-
 Ref: tags.user_id > users.id [delete: cascade]
 
+/* ---- Article Tags ---- */
 Table article_tags {
-  article_id int [not null]
-  tag_id int [not null]
-  created_at timestamp [default: "current_timestamp"]
-  updated_at timestamp [default: "current_timestamp"]
+  article_id int [pk, not null]
+  tag_id int [pk, not null]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_article_tags_updated_at"
+    }
+  ]
 
   indexes {
-    (article_id, tag_id) [unique]
+    (tag_id, article_id) [
+      name: "idx_article_tags_tag_article"
+    ]
+    (article_id, tag_id) [
+      name: "idx_article_tags_article_tags"
+    ]
   }
 }
+Ref: article_tags.article_id > articles.id [delete: cascade]
+Ref: article_tags.tag_id > tags.id [delete: cascade]
 
-Ref: article_tags.article_id <> articles.id [delete: cascade]
-Ref: article_tags.tag_id <> tags.id [delete: cascade]
-
+/* ---- Comments ---- */
 Table comments {
   id serial [pk]
-  body varchar [not null]
-  user_id uuid [default: null]
+  public_id uuid [unique, default: "uuid_generate_v4()"]
+  body text [not null]
+  user_id int [default: null]
   user_name varchar [default: null]
+  is_active boolean [default: true]
   article_id int [not null]
-  created_at timestamp [default: "current_timestamp"]
-  updated_at timestamp [default: "current_timestamp"]
-}
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_comments_updated_at"
+    }
+  ]
 
+  indexes {
+    (article_id) [
+      name: "idx_comments_article_id"
+    ]
+  }
+}
 Ref: comments.user_id > users.id [delete: set null]
 Ref: comments.article_id > articles.id [delete: cascade]
 
-Table images {
+/* ---- Storage Types ---- */
+Table storage_types {
   id serial [pk]
-  url text [not null]
-  article_id int [not null]
-  created_at timestamp [default: "current_timestamp"]
-  updated_at timestamp [default: "current_timestamp"]
+  name varchar [
+    not null,
+    unique,
+    Note: {
+      "Seeds:
+        - 1: database
+        - 2: custom
+        - 3: s3"
+    }
+  ]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_storage_types_updated_at"
+    }
+  ]
 }
 
+/* ---- Images ---- */
+Table images {
+  id serial [pk]
+  public_id uuid [unique, default: "uuid_generate_v4()"]
+  name varchar [not null]
+  mime_type varchar [not null]
+  data bytea [default: null]
+  url text [default: null]
+  storage_type_id int [not null, default: 1]
+  article_id int [not null]
+  created_at timestamptz [default: "current_timestamp"]
+  updated_at timestamptz [
+    default: "current_timestamp"
+    Note: {
+      "Trigger: trg_images_updated_at"
+    }
+  ]
+
+  Note: {
+    "Check: ( (data IS NOT NULL AND url IS NULL) OR (data IS NULL AND url IS NOT NULL) )"
+  }
+}
 Ref: images.article_id > articles.id [delete: cascade]
+Ref: images.storage_type_id > storage_types.id [delete: set null]
